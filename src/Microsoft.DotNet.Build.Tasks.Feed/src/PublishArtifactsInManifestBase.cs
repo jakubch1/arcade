@@ -1,14 +1,6 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using Microsoft.Build.Framework;
-using Microsoft.DotNet.Build.Tasks.Feed.Model;
-using Microsoft.DotNet.Maestro.Client;
-using Microsoft.DotNet.Maestro.Client.Models;
-using Microsoft.DotNet.VersionTools.BuildManifest.Model;
-using Microsoft.DotNet.VersionTools.Util;
-using NuGet.Packaging.Core;
-using NuGet.Versioning;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -22,6 +14,13 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Build.Framework;
+using Microsoft.DotNet.Build.Tasks.Feed.Model;
+using Microsoft.DotNet.Maestro.Client;
+using Microsoft.DotNet.Maestro.Client.Models;
+using Microsoft.DotNet.VersionTools.BuildManifest.Model;
+using NuGet.Packaging.Core;
+using NuGet.Versioning;
 using static Microsoft.DotNet.Build.Tasks.Feed.GeneralUtils;
 using MsBuildUtils = Microsoft.Build.Utilities;
 
@@ -118,6 +117,12 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
         private static readonly string FourPartVersionPattern = @"\d+\.\d+\.\d+\.\d+";
 
         private static Regex FourPartVersionRegex = new Regex(FourPartVersionPattern);
+
+        private const string SymwebServerPath = "https://microsoft.artifacts.visualstudio.com/DefaultCollection";
+
+        private const string MsdlServerPath = "https://microsoftpublicsymbols.artifacts.visualstudio.com/DefaultCollection";
+
+        private const int ExpirationInDays = 3650;
 
         protected LatestLinksManager LinkManager { get; set; } = null;
 
@@ -261,8 +266,7 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
         /// </summary>
         public void CheckForStableAssetsInNonIsolatedFeeds()
         {
-            if ((!string.IsNullOrEmpty(BuildModel.Identity.IsReleaseOnlyPackageVersion) && bool.Parse(BuildModel.Identity.IsReleaseOnlyPackageVersion))
-                || SkipSafetyChecks)
+            if (BuildModel.Identity.IsReleaseOnlyPackageVersion || SkipSafetyChecks)
             {
                 return;
             }
@@ -307,6 +311,87 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
                         }
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Publishes symbol, dll and pdb files to symbol server.
+        /// </summary>
+        /// <param name="pdbArtifactsBasePath">Path to dll and pdb files</param>
+        /// <param name="msdlToken">Token to authenticate msdl</param>
+        /// <param name="symWebToken">Token to authenticate symweb</param>
+        /// <param name="symbolPublishingExclusionsFile">Right now we do not add any files to this, so this is going to be null</param>
+        /// <param name="temporarySymbolsLocation">Path to Symbol.nupkgs</param>
+        /// <param name="publishSpecialClrFiles">If true, the special coreclr module indexed files like DBI, DAC and SOS are published</param>
+        /// <returns></returns>
+        protected async Task HandleSymbolPublishingAsync (
+            string pdbArtifactsBasePath,
+            string msdlToken, 
+            string symWebToken,
+            string symbolPublishingExclusionsFile,
+            string temporarySymbolsLocation,
+            bool publishSpecialClrFiles)
+        {
+            StringBuilder symbolLog = new StringBuilder();
+            symbolLog.AppendLine("Publishing Symbols to Symbol server: ");
+
+            if (Directory.Exists(temporarySymbolsLocation))
+            {
+                string[] fileEntries = Directory.GetFiles(temporarySymbolsLocation);
+
+                var category = TargetFeedContentType.Symbols;
+
+                HashSet<TargetFeedConfig> feedConfigsForSymbols = FeedConfigs[category];
+
+                Dictionary<string, string> serversToPublish = new Dictionary<string, string>();
+                
+                if (feedConfigsForSymbols.Any(x => (x.SymbolTargetType & SymbolTargetType.Msdl) != SymbolTargetType.None))
+                {
+                    serversToPublish.Add(MsdlServerPath, msdlToken);
+                }
+                if (feedConfigsForSymbols.Any(x => (x.SymbolTargetType & SymbolTargetType.SymWeb) != SymbolTargetType.None))
+                {
+                    serversToPublish.Add(SymwebServerPath, symWebToken);
+                }
+
+                IEnumerable<string> filesToSymbolServer = null;
+                if (Directory.Exists(pdbArtifactsBasePath))
+                {
+                    var pdbEntries = System.IO.Directory.EnumerateFiles(pdbArtifactsBasePath, "*.pdb", System.IO.SearchOption.AllDirectories);
+                    var dllEntries = System.IO.Directory.EnumerateFiles(pdbArtifactsBasePath, "*.dll", System.IO.SearchOption.AllDirectories);
+                    filesToSymbolServer = pdbEntries.Concat(dllEntries);
+                }
+
+                foreach (var server in serversToPublish)
+                {
+                    var serverPath = server.Key;
+                    var token = server.Value;
+                    symbolLog.AppendLine($"Publishing symbol packages to {serverPath}:");
+                    symbolLog.AppendLine(
+                        $"Performing symbol publishing...\nSymbolServerPath : ${serverPath} \nExpirationInDays : {ExpirationInDays} \nConvertPortablePdbsToWindowsPdb : false \ndryRun: false \nTotal number of symbol files : {fileEntries.Length} ");
+                    await PublishSymbolsHelper.PublishAsync(
+                        Log,
+                        serverPath,
+                        token,
+                        fileEntries,
+                        filesToSymbolServer,
+                        null,
+                        ExpirationInDays,
+                        false,
+                        publishSpecialClrFiles,
+                        null,
+                        false,
+                        false,
+                        true);
+                    symbolLog.AppendLine("Successfully published to Symbol Server.");
+                    symbolLog.AppendLine();
+                    Log.LogMessage(MessageImportance.High, symbolLog.ToString());
+                    symbolLog.Clear();
+                }
+            }
+            else
+            {
+                Log.LogError($"Temporary symbols directory {temporarySymbolsLocation} does not exists.");
             }
         }
 
@@ -624,25 +709,25 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
             string feedVisibility,
             string feedName,
             Func<string, string, HttpClient, MsBuildUtils.TaskLoggingHelper, Task<PackageFeedStatus>> CompareLocalPackageToFeedPackageCallBack = null,
-            Func<string, string, ProcessExecutionResult> RunProcessAndGetOutputsCallBack = null
+            Func<string, string, Task<ProcessExecutionResult>> RunProcessAndGetOutputsCallBack = null
             )
         {
             // Using these callbacks we can mock up functionality when testing.
             CompareLocalPackageToFeedPackageCallBack ??= GeneralUtils.CompareLocalPackageToFeedPackage;
-            RunProcessAndGetOutputsCallBack ??= GeneralUtils.RunProcessAndGetOutputs;
+            RunProcessAndGetOutputsCallBack ??= GeneralUtils.RunProcessAndGetOutputsAsync;
             ProcessExecutionResult nugetResult = null;
+            var packageStatus = GeneralUtils.PackageFeedStatus.Unknown;
 
             try
             {
                 Log.LogMessage(MessageImportance.Normal, $"Pushing local package {localPackageLocation} to target feed {feedConfig.TargetURL}"); 
-                var packageStatus = GeneralUtils.PackageFeedStatus.Unknown;
                 int attemptIndex = 0;
 
                 do
                 {
                     attemptIndex++;
                     // The feed key when pushing to AzDo feeds is "AzureDevOps" (works with the credential helper).
-                    nugetResult = RunProcessAndGetOutputsCallBack(NugetPath, $"push \"{localPackageLocation}\" -Source \"{feedConfig.TargetURL}\" -NonInteractive -ApiKey AzureDevOps -Verbosity quiet");
+                    nugetResult = await RunProcessAndGetOutputsCallBack(NugetPath, $"push \"{localPackageLocation}\" -Source \"{feedConfig.TargetURL}\" -NonInteractive -ApiKey AzureDevOps -Verbosity quiet");
 
                     if (nugetResult.ExitCode == 0)
                     {
@@ -685,7 +770,7 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
                 {
                     Log.LogError($"Failed to publish package '{id}@{version}' to '{feedConfig.TargetURL}' after {MaxRetryCount} attempts. (Final status: {packageStatus})");
                 }
-                else if (!Log.HasLoggedErrors)
+                else
                 {
                     Log.LogMessage(MessageImportance.High, $"Succeeded publishing package '{localPackageLocation}' to feed {feedConfig.TargetURL}");
                 }
@@ -694,7 +779,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
             {
                 Log.LogError($"Unexpected exception pushing package '{id}@{version}': {e.Message}");
             }
-            if (Log.HasLoggedErrors && nugetResult?.ExitCode != 0)
+
+            if (packageStatus != GeneralUtils.PackageFeedStatus.ExistsAndIdenticalToLocal && nugetResult?.ExitCode != 0)
             {
                 Log.LogError($"Output from nuget.exe: {Environment.NewLine}StdOut:{Environment.NewLine}{nugetResult.StandardOut}{Environment.NewLine}StdErr:{Environment.NewLine}{nugetResult.StandardError}");
             }

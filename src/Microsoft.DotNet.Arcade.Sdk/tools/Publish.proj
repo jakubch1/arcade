@@ -11,6 +11,7 @@
       DotNetSymbolServerTokenMsdl       Personal access token for MSDL symbol server. Available from variable group DotNet-Symbol-Publish.
       DotNetSymbolServerTokenSymWeb     Personal access token for SymWeb symbol server. Available from variable group DotNet-Symbol-Publish.
       DotNetSymbolExpirationInDays      Symbol expiration time in days (defaults to 10 years).
+      SkipPackageChecks                 Skips package safety checks.
   -->
 
   <Import Project="BuildStep.props" />
@@ -27,7 +28,7 @@
 
     <!-- If `IsReleaseOnlyPackageVersion` is set to true, package safety checks can be skipped-->
     <IsReleaseOnlyPackageVersion>false</IsReleaseOnlyPackageVersion>
-    <IsReleaseOnlyPackageVersion Condition ="'$(PreReleaseVersionLabel)' == '' and '$(AutoGenerateAssemblyVersion)' == 'true'">true</IsReleaseOnlyPackageVersion>
+    <IsReleaseOnlyPackageVersion Condition ="('$(SkipPackagePublishingVersionChecks)' == 'true') or ('$(PreReleaseVersionLabel)' == '' and '$(AutoGenerateAssemblyVersion)' == 'true')">true</IsReleaseOnlyPackageVersion>
     
     <!-- If `AutoGenerateSymbolPackages` is not set we default it to true. -->
     <AutoGenerateSymbolPackages Condition="'$(AutoGenerateSymbolPackages)' == ''">true</AutoGenerateSymbolPackages>
@@ -43,7 +44,7 @@
     <PublishDependsOnTargets Condition="$(PublishToSourceBuildStorage)">$(PublishDependsOnTargets);PublishToSourceBuildStorage</PublishDependsOnTargets>
     <PublishDependsOnTargets Condition="$(DotNetPublishUsingPipelines)">$(PublishDependsOnTargets);PublishToAzureDevOpsArtifacts</PublishDependsOnTargets>
 
-    <PublishDependsOnTargets>BeforePublish;GenerateBuildManifest;$(PublishDependsOnTargets)</PublishDependsOnTargets>
+    <PublishDependsOnTargets>BeforePublish;$(PublishDependsOnTargets)</PublishDependsOnTargets>
   </PropertyGroup>
 
   <Import Project="$(NuGetPackageRoot)microsoft.dotnet.build.tasks.feed\$(MicrosoftDotNetBuildTasksFeedVersion)\build\Microsoft.DotNet.Build.Tasks.Feed.targets"/>
@@ -98,6 +99,9 @@
       <PackagesToPublish Remove="@(PackagesToPublish)" />
       <PackagesToPublish Include="@(ItemsToPushToBlobFeed)" />
     </ItemGroup>
+    
+    <Error Condition="'$(AllowEmptySignPostBuildList)' != 'true' AND '@(ItemsToSignPostBuild)' == ''" 
+           Text="List of files to sign post-build is empty. Make sure that ItemsToSignPostBuild is configured correctly." />
   </Target>
 
   <Target Name="PublishToSourceBuildStorage">
@@ -140,9 +144,6 @@
       <ManifestBuildData Include="AzureDevOpsRepository=$(BUILD_REPOSITORY_URI)" />
       <ManifestBuildData Include="AzureDevOpsBranch=$(BUILD_SOURCEBRANCH)" />
     </ItemGroup>
-    
-    <Error Condition="'$(AllowEmptySignPostBuildList)' != 'true' AND '@(ItemsToSignPostBuild)' == ''" 
-           Text="List of files to sign post-build is empty. Make sure that ItemsToSignPostBuild is configured correctly." />
 
     <!--
       The user can set `PublishingVersion` via eng\Publishing.props
@@ -262,20 +263,6 @@
   </Target>
 
   <Import Project="Sign.props" />
-
-  <UsingTask TaskName="Microsoft.DotNet.Arcade.Sdk.GenerateAzureDevOpsBuildManifest" AssemblyFile="$(ArcadeSdkBuildTasksAssembly)"/>
-
-  <Target Name="GenerateBuildManifest">
-    <GenerateAzureDevOpsBuildManifest
-      AzureDevOpsCollectionUri="$(SYSTEM_TEAMFOUNDATIONCOLLECTIONURI)"
-      AzureDevOpsProject="$(SYSTEM_TEAMPROJECT)"
-      AzureDevOpsBuildId="$(BUILD_BUILDID)"
-      ItemsToSign="@(ItemsToSignPostBuild)"
-      StrongNameSignInfo="@(StrongNameSignInfo)"
-      FileSignInfo="@(FileSignInfo)"
-      FileExtensionSignInfo="@(FileExtensionSignInfo)"
-      ManifestPath="$(ArtifactsLogDir)/manifest.props" />
-  </Target>
 
   <Import Project="SourceBuild/SourceBuildArcadePublish.targets" Condition="'$(ArcadeBuildFromSource)' == 'true'" />
 
