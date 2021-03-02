@@ -1,9 +1,9 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using Microsoft.Arcade.Common;
 using Microsoft.Build.Framework;
 using Microsoft.IdentityModel.Clients.ActiveDirectory;
-using Microsoft.DotNet.VersionTools.Util;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Concurrent;
@@ -351,7 +351,8 @@ namespace Microsoft.DotNet.Deployment.Tasks.Links.src
                         targetUrl = link.TargetUrl,
                         lastModifiedBy = linkCreatedOrUpdatedBy,
                         description = link.Description,
-                        groupOwner = linkGroupOwner
+                        groupOwner = linkGroupOwner,
+                        isAllowParam = true
                     };
                 }));
             }
@@ -369,7 +370,8 @@ namespace Microsoft.DotNet.Deployment.Tasks.Links.src
                         groupOwner = linkGroupOwner,
                         // Create specific items
                         createdBy = linkCreatedOrUpdatedBy,
-                        isVanity = !string.IsNullOrEmpty(link.ShortUrl)
+                        isVanity = !string.IsNullOrEmpty(link.ShortUrl),
+                        isAllowParam = true
                     };
                 }));
             }

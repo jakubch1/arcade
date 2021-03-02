@@ -1,11 +1,15 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using Microsoft.Arcade.Common;
 using Microsoft.Build.Framework;
+using Microsoft.DotNet.Build.Tasks.Feed.Model;
 using Microsoft.DotNet.Maestro.Client;
+using Microsoft.DotNet.VersionTools.Automation;
 using Microsoft.DotNet.VersionTools.BuildManifest.Model;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using System;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -15,7 +19,7 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
     ///     The intended use of this task is to push artifacts described in
     ///     a build manifest to package feeds.
     /// </summary>
-    public class PublishArtifactsInManifest : Microsoft.Build.Utilities.Task
+    public class PublishArtifactsInManifest : MSBuildTaskBase
     {
         /// <summary>
         /// Comma separated list of Maestro++ Channel IDs to which the build should
@@ -108,7 +112,13 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
 
         public string AzureStorageTargetFeedKey { get; set; }
 
+        public bool AllowFeedOverrides { get; set; }
+
+        public string ChecksumsFeedOverride { get; set; }
+
         public string ChecksumsFeedKey { get; set; }
+
+        public string InstallersFeedOverride { get; set; }
 
         public string InstallersFeedKey { get; set; }
 
@@ -117,6 +127,12 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
         public string InternalCheckSumsFeedKey { get; set; }
 
         public string AzureDevOpsFeedsKey { get; set; }
+
+        public string TransportFeedOverride { get; set; }
+        
+        public string ShippingFeedOverride { get; set; }
+
+        public string SymbolsFeedOverride { get; set; }
 
         /// <summary>
         /// Path to dll and pdb files
@@ -162,13 +178,40 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
 
         public string AkaMSGroupOwner { get; set; }
 
+        public string BuildQuality
+        {
+            get { return _buildQuality.GetDescription(); }
+            set { Enum.TryParse<PublishingConstants.BuildQuality>(value, true, out _buildQuality); }
+        }
+
         /// <summary>
         /// Just an internal flag to keep track whether we published assets via a V3 manifest or not.
         /// </summary>
         private static bool PublishedV3Manifest { get; set; }
 
-        public override bool Execute()
+        private IBuildModelFactory _buildModelFactory;
+        private IFileSystem _fileSystem;
+
+        private PublishingConstants.BuildQuality _buildQuality;
+
+        public override void ConfigureServices(IServiceCollection collection)
         {
+            collection.TryAddSingleton<IBuildModelFactory, BuildModelFactory>();
+            collection.TryAddSingleton<ISigningInformationModelFactory, SigningInformationModelFactory>();
+            collection.TryAddSingleton<IBlobArtifactModelFactory, BlobArtifactModelFactory>();
+            collection.TryAddSingleton<IPackageArtifactModelFactory, PackageArtifactModelFactory>();
+            collection.TryAddSingleton<INupkgInfoFactory, NupkgInfoFactory>();
+            collection.TryAddSingleton<IPackageArchiveReaderFactory, PackageArchiveReaderFactory>();
+            collection.TryAddSingleton<IFileSystem, FileSystem>();
+            collection.TryAddSingleton(Log);
+        }
+
+        public bool ExecuteTask(IBuildModelFactory buildModelFactory,
+            IFileSystem fileSystem)
+        {
+            _buildModelFactory = buildModelFactory;
+            _fileSystem = fileSystem;
+
             return ExecuteAsync().GetAwaiter().GetResult();
         }
 
@@ -209,7 +252,7 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
                         IMaestroApi client = ApiFactory.GetAuthenticated(MaestroApiEndpoint, BuildAssetRegistryToken);
                         Maestro.Client.Models.Build buildInformation = await client.Builds.GetBuildAsync(BARBuildId);
 
-                        var targetChannelsIds = TargetChannels.Split(',').Select(ci => int.Parse(ci));
+                        var targetChannelsIds = TargetChannels.Split('-').Select(ci => int.Parse(ci));
 
                         foreach (var targetChannelId in targetChannelsIds)
                         {
@@ -233,13 +276,13 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
         {
             Log.LogMessage(MessageImportance.High, $"Creating a task to publish assets from {manifestFullPath}");
 
-            if (!File.Exists(manifestFullPath))
+            if (!_fileSystem.FileExists(manifestFullPath))
             {
                 Log.LogError($"Problem reading asset manifest path from '{manifestFullPath}'");
                 return null;
             }
 
-            BuildModel buildModel = BuildManifestUtil.ManifestFileToModel(manifestFullPath, Log);
+            BuildModel buildModel = _buildModelFactory.ManifestFileToModel(manifestFullPath);
             
             if (buildModel.Identity.PublishingVersion == PublishingInfraVersion.Legacy)
             {
@@ -282,7 +325,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
                 AkaMSCreatedBy = this.AkaMSCreatedBy,
                 AkaMSGroupOwner = this.AkaMSGroupOwner,
                 AkaMsOwners = this.AkaMsOwners,
-                AkaMSTenant = this.AkaMSTenant
+                AkaMSTenant = this.AkaMSTenant,
+                BuildQuality = this.BuildQuality
             };
         }
 
@@ -321,7 +365,14 @@ namespace Microsoft.DotNet.Build.Tasks.Feed
                 SymWebToken = this.SymWebToken,
                 MsdlToken = this.MsdlToken,
                 SymbolPublishingExclusionsFile = this.SymbolPublishingExclusionsFile,
-                PublishSpecialClrFiles = this.PublishSpecialClrFiles
+                PublishSpecialClrFiles = this.PublishSpecialClrFiles,
+                BuildQuality = this.BuildQuality,
+                AllowFeedOverrides = this.AllowFeedOverrides,
+                InstallersFeedOverride = this.InstallersFeedOverride,
+                ChecksumsFeedOverride = this.ChecksumsFeedOverride,
+                ShippingFeedOverride = this.ShippingFeedOverride,
+                TransportFeedOverride = this.TransportFeedOverride,
+                SymbolsFeedOverride = this.SymbolsFeedOverride
             };
         }
     }

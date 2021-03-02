@@ -1,13 +1,13 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using FluentAssertions;
+using Microsoft.Arcade.Test.Common;
 using Microsoft.DotNet.Build.Tasks.Feed.Model;
-using Microsoft.DotNet.Build.Tasks.Feed.Tests.TestDoubles;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
 using Xunit.Abstractions;
-using FluentAssertions;
 
 namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
 {
@@ -15,6 +15,7 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
     {
         private const string AzureStorageTargetFeedPAT = "AzureStorageTargetFeedPAT";
         private const string LatestLinkShortUrlPrefix = "LatestLinkShortUrlPrefix";
+        private const string BuildQuality = "quality";
         private const string AzureDevOpsFeedsKey = "AzureDevOpsFeedsKey";
 
         private const string StablePackageFeed = "StablePackageFeed";
@@ -29,6 +30,11 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
         private const string AzureDevOpsStaticShippingFeed = "AzureDevOpsStaticShippingFeed";
         private const string AzureDevOpsStaticTransportFeed = "AzureDevOpsStaticTransportFeed";
         private const string AzureDevOpsStaticSymbolsFeed = "AzureDevOpsStaticSymbolsFeed";
+
+        private static List<string> FilesToExclude = new List<string>() { 
+            "filename",
+            "secondfilename"
+        };
 
         private readonly List<TargetFeedContentType> Installers = new List<TargetFeedContentType>() { 
             TargetFeedContentType.OSX,
@@ -74,7 +80,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                         isolated: true,
                         @internal: false,
                         allowOverwrite: true,
-                        symbolTargetType));
+                        symbolTargetType,
+                        filenamesToExclude: FilesToExclude));
 
                 foreach (var contentType in Installers)
                 {
@@ -89,7 +96,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                             isolated: true,
                             @internal: false,
                             allowOverwrite: true,
-                            symbolTargetType));
+                            symbolTargetType,
+                            filenamesToExclude: FilesToExclude));
                 }
             }
 
@@ -104,7 +112,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     isolated: true,
                     @internal: false,
                     allowOverwrite: false,
-                    symbolTargetType));
+                    symbolTargetType,
+                    filenamesToExclude: FilesToExclude));
 
             expectedFeeds.Add(
                 new TargetFeedConfig(
@@ -117,7 +126,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     isolated: true,
                     @internal: false,
                     allowOverwrite: false,
-                    symbolTargetType));
+                    symbolTargetType,
+                    filenamesToExclude: FilesToExclude));
 
             expectedFeeds.Add(
                 new TargetFeedConfig(
@@ -130,7 +140,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     isolated: false,
                     @internal: false,
                     allowOverwrite: false,
-                    symbolTargetType));
+                    symbolTargetType,
+                    filenamesToExclude: FilesToExclude));
 
             var buildEngine = new MockBuildEngine();
             var config = new SetupTargetFeedConfigV3(
@@ -147,12 +158,13 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     AzureDevOpsStaticShippingFeed,
                     AzureDevOpsStaticTransportFeed,
                     AzureDevOpsStaticSymbolsFeed,
-                    LatestLinkShortUrlPrefix,
+                    $"{LatestLinkShortUrlPrefix}/{BuildQuality}",
                     AzureDevOpsFeedsKey,
                     buildEngine,
                     symbolTargetType,
                     StablePackageFeed,
-                    StableSymbolsFeed
+                    StableSymbolsFeed,
+                    filesToExclude: FilesToExclude
                 );
 
             var actualFeeds = config.Setup();
@@ -182,7 +194,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                             isolated: false,
                             @internal: true,
                             allowOverwrite: false,
-                            symbolTargetType));
+                            symbolTargetType,
+                            filenamesToExclude: FilesToExclude));
                 }
 
                 expectedFeeds.Add(
@@ -196,7 +209,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                         isolated: false,
                         @internal: true,
                         allowOverwrite: false,
-                        symbolTargetType));
+                        symbolTargetType,
+                        filenamesToExclude: FilesToExclude));
 
             }
 
@@ -211,7 +225,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     isolated: false,
                     @internal: true,
                     allowOverwrite: false,
-                    symbolTargetType));
+                    symbolTargetType,
+                    filenamesToExclude: FilesToExclude));
 
             expectedFeeds.Add(
                 new TargetFeedConfig(
@@ -224,7 +239,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     isolated: false,
                     @internal: true,
                     allowOverwrite: false,
-                    symbolTargetType));
+                    symbolTargetType,
+                    filenamesToExclude: FilesToExclude));
 
             expectedFeeds.Add(
                 new TargetFeedConfig(
@@ -237,7 +253,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     isolated: false,
                     @internal: true,
                     allowOverwrite: false,
-                    symbolTargetType));
+                    symbolTargetType,
+                    filenamesToExclude: FilesToExclude));
 
             var buildEngine = new MockBuildEngine();
             var config = new SetupTargetFeedConfigV3(
@@ -254,10 +271,11 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     AzureDevOpsStaticShippingFeed,
                     AzureDevOpsStaticTransportFeed,
                     AzureDevOpsStaticSymbolsFeed,
-                    LatestLinkShortUrlPrefix,
+                    $"{LatestLinkShortUrlPrefix}/{BuildQuality}",
                     AzureDevOpsFeedsKey,
                     buildEngine: buildEngine,
-                    symbolTargetType
+                    symbolTargetType,
+                    filesToExclude: FilesToExclude
                 );
 
             var actualFeeds = config.Setup();
@@ -280,12 +298,13 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                         ChecksumsTargetStaticFeed,
                         FeedType.AzureStorageFeed,
                         ChecksumsTargetStaticFeedKey,
-                        LatestLinkShortUrlPrefix,
+                        $"{LatestLinkShortUrlPrefix}/{BuildQuality}",
                         AssetSelection.All,
                         isolated: false,
                         @internal: false,
                         allowOverwrite: false,
-                        symbolTargetType));
+                        symbolTargetType,
+                        filenamesToExclude: FilesToExclude));
 
                 foreach (var contentType in Installers)
                 {
@@ -295,12 +314,13 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                             InstallersTargetStaticFeed,
                             FeedType.AzureStorageFeed,
                             InstallersTargetStaticFeedKey,
-                            LatestLinkShortUrlPrefix,
+                            $"{LatestLinkShortUrlPrefix}/{BuildQuality}",
                             AssetSelection.All,
                             isolated: false,
                             @internal: false,
                             allowOverwrite: false,
-                            symbolTargetType));
+                            symbolTargetType,
+                            filenamesToExclude: FilesToExclude));
                 }
             }
 
@@ -315,7 +335,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     isolated: false,
                     @internal: false,
                     allowOverwrite: false,
-                    symbolTargetType));
+                    symbolTargetType,
+                    filenamesToExclude: FilesToExclude));
 
             expectedFeeds.Add(
                 new TargetFeedConfig(
@@ -328,7 +349,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     isolated: false,
                     @internal: false,
                     allowOverwrite: false,
-                    symbolTargetType));
+                    symbolTargetType,
+                    filenamesToExclude: FilesToExclude));
 
             expectedFeeds.Add(
                 new TargetFeedConfig(
@@ -341,7 +363,8 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     isolated: false,
                     @internal: false,
                     allowOverwrite: false,
-                    symbolTargetType));
+                    symbolTargetType,
+                    filenamesToExclude: FilesToExclude));
 
             var buildEngine = new MockBuildEngine();
             var config = new SetupTargetFeedConfigV3(
@@ -358,10 +381,11 @@ namespace Microsoft.DotNet.Build.Tasks.Feed.Tests
                     AzureDevOpsStaticShippingFeed,
                     AzureDevOpsStaticTransportFeed,
                     AzureDevOpsStaticSymbolsFeed,
-                    LatestLinkShortUrlPrefix,
+                    $"{LatestLinkShortUrlPrefix}/{BuildQuality}",
                     AzureDevOpsFeedsKey,
                     buildEngine: buildEngine,
-                    symbolTargetType
+                    symbolTargetType,
+                    filesToExclude: FilesToExclude
                 );
 
             var actualFeeds = config.Setup();

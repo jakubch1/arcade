@@ -13,6 +13,9 @@ namespace Microsoft.DotNet.Helix.Sdk
     /// </summary>
     public class CreateXHarnessAndroidWorkItems : XHarnessTaskBase
     {
+        private const string PosixAndroidWrapperScript = "xharness-helix-job.android.sh";
+        private const string NonPosixAndroidWrapperScript = "xharness-helix-job.android.bat";
+
         /// <summary>
         /// An array of one or more paths to application packages (.apk for Android)
         /// that will be used to create Helix work items.
@@ -62,27 +65,33 @@ namespace Microsoft.DotNet.Helix.Sdk
 
             Log.LogMessage($"Creating work item with properties Identity: {workItemName}, Payload: {appPackage.ItemSpec}, Command: {command}");
 
-            return new Microsoft.Build.Utilities.TaskItem(workItemName, new Dictionary<string, string>()
+            string workItemZip = await CreateZipArchiveOfPackageAsync(appPackage.ItemSpec);
+
+            return new Build.Utilities.TaskItem(workItemName, new Dictionary<string, string>()
             {
                 { "Identity", workItemName },
-                { "PayloadArchive", CreateZipArchiveOfPackage(appPackage.ItemSpec) },
+                { "PayloadArchive", workItemZip},
                 { "Command", command },
                 { "Timeout", workItemTimeout.ToString() },
             });
         }
 
-        private string CreateZipArchiveOfPackage(string fileToZip)
+        private async Task<string> CreateZipArchiveOfPackageAsync(string fileToZip)
         {
             string directoryOfPackage = Path.GetDirectoryName(fileToZip);
             string fileName = $"xharness-apk-payload-{Path.GetFileNameWithoutExtension(fileToZip).ToLowerInvariant()}.zip";
             string outputZipAbsolutePath = Path.Combine(directoryOfPackage, fileName);
             using (FileStream fs = File.OpenWrite(outputZipAbsolutePath))
+            using (var zip = new ZipArchive(fs, ZipArchiveMode.Create, false))
             {
-                using (var zip = new ZipArchive(fs, ZipArchiveMode.Create, false))
-                {
-                    zip.CreateEntryFromFile(fileToZip, Path.GetFileName(fileToZip));
-                }
+                zip.CreateEntryFromFile(fileToZip, Path.GetFileName(fileToZip));
             }
+
+            // WorkItem payloads of APKs can be reused if sent to multiple queues at once,
+            // so we'll always include both scripts (very small)
+            await AddResourceFileToPayload(outputZipAbsolutePath, PosixAndroidWrapperScript);
+            await AddResourceFileToPayload(outputZipAbsolutePath, NonPosixAndroidWrapperScript);
+
             return outputZipAbsolutePath;
         }
 
@@ -103,7 +112,13 @@ namespace Microsoft.DotNet.Helix.Sdk
             string instrumentationArg = string.IsNullOrEmpty(androidInstrumentationName) ? string.Empty : $"-i={androidInstrumentationName} ";
 
             string outputDirectory = IsPosixShell ? "$HELIX_WORKITEM_UPLOAD_ROOT" : "%HELIX_WORKITEM_UPLOAD_ROOT%";
-            string xharnessRunCommand = $"dotnet exec \"{(IsPosixShell ? "$XHARNESS_CLI_PATH" : "%XHARNESS_CLI_PATH%")}\" android test " +
+            string wrapperScriptName = IsPosixShell ? PosixAndroidWrapperScript : NonPosixAndroidWrapperScript;
+
+            string xharnessHelixWrapperScript = IsPosixShell ? $"chmod +x ./{wrapperScriptName} && ./{wrapperScriptName}"
+                                                             : $"{wrapperScriptName}";
+
+            string xharnessRunCommand = $"{xharnessHelixWrapperScript} " +
+                                        $"dotnet exec \"{(IsPosixShell ? "$XHARNESS_CLI_PATH" : "%XHARNESS_CLI_PATH%")}\" android test " +
                                         $"--app \"{Path.GetFileName(appPackage.ItemSpec)}\" " +
                                         $"--output-directory \"{outputDirectory}\" " +
                                         $"--timeout \"{xHarnessTimeout}\" " +
